@@ -1,0 +1,29 @@
+---
+- name: Join Worker Nodes to Kubernetes Master Node
+  hosts: k8s_workers
+  become: true
+  environment:
+    ANSIBLE_HOST_KEY_CHECKING: "False"
+  tasks:
+    - name: Get the kubeadm join command from the master node
+      delegate_to: k8s-master
+      command: tail -n 2 /tmp/kubeadm_join_command.txt
+      register: join_command
+      changed_when: false
+
+    - name: Clean up join command to remove extra whitespace, newline, or tab characters
+      set_fact:
+        join_command_cleaned: "{{ join_command.stdout | regex_replace('[\\n\\r\\t]', '') | trim }}"
+
+    - name: Join worker node to the master cluster
+      command: "{{ join_command_cleaned }}"
+      when: join_command_cleaned is defined
+
+- name: Install Calico Network Plugin and Metrics Server
+  hosts: k8s_master
+  tasks:
+    - name: Apply the Calico manifest to install the network plugin
+      command: kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+
+    - name: Apply the metrics server manifest
+      command: kubectl apply -f https://raw.githubusercontent.com/techiescamp/kubeadm-scripts/main/manifests/metrics-server.yaml

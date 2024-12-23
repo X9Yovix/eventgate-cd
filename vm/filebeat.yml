@@ -1,0 +1,13 @@
+filebeat.inputs:
+  - type: container
+    containers.ids:
+      - '*'
+    paths:
+      - /var/log/containers/*.log
+
+output.logstash:
+  hosts: ["10.0.0.30:5044"]
+  ssl.enabled: false
+
+json.keys_under_root: true
+json.add_error_key: true

@@ -1,0 +1,145 @@
+---
+- name: Install Kubernetes on all nodes
+  hosts: all
+  become: true
+  vars:
+    KUBERNETES_VERSION: "v1.30"
+    CRIO_VERSION: "v1.30"
+    CRICTL_VERSION: "v1.28.0"
+  tasks:
+    - name: Update apt package index
+      apt:
+        update_cache: yes
+
+    - name: Install required dependencies
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - apt-transport-https
+        - ca-certificates
+        - curl
+        - gpg
+        - software-properties-common
+
+    - name: Create kernel modules file for Kubernetes
+      copy:
+        content: |
+          overlay
+          br_netfilter
+        dest: /etc/modules-load.d/k8s.conf
+
+    - name: Load kernel modules
+      shell: |
+        modprobe overlay
+        modprobe br_netfilter
+
+    - name: Configure sysctl parameters for Kubernetes
+      copy:
+        content: |
+          net.bridge.bridge-nf-call-iptables = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward = 1
+        dest: /etc/sysctl.d/k8s.conf
+
+    - name: Apply sysctl parameters
+      command: sysctl --system
+
+    - name: Disable swap
+      shell: |
+        sudo swapoff -a
+        (crontab -l 2>/dev/null; echo "@reboot /sbin/swapoff -a") | crontab - || true
+      args:
+        creates: /etc/fstab
+
+    - name: Ensure /etc/apt/keyrings directory exists
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: 0755
+
+    - name: Download Kubernetes GPG key
+      shell: |
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/{{ KUBERNETES_VERSION }}/deb/Release.key | \
+        sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      args:
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+    - name: Add Kubernetes repository
+      shell: |
+        echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/{{ KUBERNETES_VERSION }}/deb/ /" | \
+        sudo tee /etc/apt/sources.list.d/kubernetes.list
+      args:
+        creates: /etc/apt/sources.list.d/kubernetes.list
+
+    - name: Download CRI-O GPG key
+      shell: |
+        curl -fsSL https://pkgs.k8s.io/addons:/cri-o:/stable:/{{ CRIO_VERSION }}/deb/Release.key | \
+        sudo gpg --dearmor -o /etc/apt/keyrings/cri-o-apt-keyring.gpg
+      args:
+        creates: /etc/apt/keyrings/cri-o-apt-keyring.gpg
+
+    - name: Add CRI-O repository
+      shell: |
+        echo "deb [signed-by=/etc/apt/keyrings/cri-o-apt-keyring.gpg] https://pkgs.k8s.io/addons:/cri-o:/stable:/{{ CRIO_VERSION }}/deb/ /" | \
+        sudo tee /etc/apt/sources.list.d/cri-o.list
+      args:
+        creates: /etc/apt/sources.list.d/cri-o.list
+
+    - name: Update apt package index
+      apt:
+        update_cache: yes
+
+    - name: Install CRI-O
+      apt:
+        name: cri-o
+        state: present
+
+    - name: Install crictl
+      shell: |
+        wget https://github.com/kubernetes-sigs/cri-tools/releases/download/{{ CRICTL_VERSION }}/crictl-{{ CRICTL_VERSION }}-linux-amd64.tar.gz
+        tar zxvf crictl-{{ CRICTL_VERSION }}-linux-amd64.tar.gz -C /usr/local/bin
+        rm -f crictl-{{ CRICTL_VERSION }}-linux-amd64.tar.gz
+      args:
+        creates: /usr/local/bin/crictl
+
+    - name: Enable and start CRI-O
+      systemd:
+        name: crio
+        enabled: yes
+        state: started
+
+    - name: Install Kubernetes packages
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    - name: Hold Kubernetes packages using apt-mark
+      command: "apt-mark hold kubelet kubeadm kubectl"
+
+    - name: Apply netfilter and IP forwarding for bootstrapping cluster
+      shell: |
+        modprobe br_netfilter
+        sysctl -w net.ipv4.ip_forward=1
+
+    - name: Enable kubelet service
+      systemd:
+        name: kubelet
+        state: started
+        enabled: yes
+
+    - name: Set KUBELET_EXTRA_ARGS with node IP
+      shell: |
+        local_ip="$(ip --json addr show eth0 | jq -r '.[0].addr_info[] | select(.family == "inet") | .local')"
+        echo "KUBELET_EXTRA_ARGS=--node-ip=$local_ip" | tee /etc/default/kubelet
+      args:
+        creates: /etc/default/kubelet
+
+    - name: Restart kubelet service to apply configuration
+      systemd:
+        name: kubelet
+        state: restarted

@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-deployment
+  namespace: eventgate
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: api-app
+  template:
+    metadata:
+      labels:
+        app: api-app
+    spec:
+      containers:
+        - name: api-app
+          image: registry.gitlab.com/glsi5/eventgate_api:latest
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secret
+          env:
+            - name: FIREBASE_CREDENTIALS_PATH
+              value: /etc/secret-volume/firebase-credentials.json
+          volumeMounts:
+            - name: firebase-credentials-volume
+              mountPath: /etc/secret-volume
+              readOnly: true
+      volumes:
+        - name: firebase-credentials-volume
+          secret:
+            secretName: firebase-credentials
+      imagePullSecrets:
+        - name: gitlab-registry-secret

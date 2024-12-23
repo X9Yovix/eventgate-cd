@@ -1,0 +1,26 @@
+FROM python:3.13-alpine
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apk add --no-cache \
+    mariadb-dev \
+    tzdata \
+    && apk add --no-cache --virtual .build-deps gcc musl-dev libffi-dev make
+
+WORKDIR /app
+
+COPY requirements.txt /app/
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+RUN pip install --no-cache-dir gunicorn
+
+COPY . /app/
+
+RUN apk del .build-deps \
+    && rm -rf /var/cache/apk/*
+
+EXPOSE 8000
+
+CMD ["gunicorn", "event_gate.wsgi:application", "--bind", "0.0.0.0:8000"]

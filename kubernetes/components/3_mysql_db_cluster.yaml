@@ -1,0 +1,24 @@
+apiVersion: mysql.oracle.com/v2
+kind: InnoDBCluster
+metadata:
+  name: mysqldb
+  namespace: eventgate
+spec:
+  secretName: mysql-secret
+  tlsUseSelfSigned: true
+  instances: 3
+  version: 9.1.0
+  router:
+    instances: 2
+    version: 9.1.0
+  datadirVolumeClaimTemplate:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 1Gi
+    storageClassName: local-path
+  mycnf: |
+    [mysqld]
+    max_connections=200
+    sql_mode=STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION
